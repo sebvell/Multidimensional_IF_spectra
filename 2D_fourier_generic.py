@@ -4,7 +4,6 @@
 Created on Thu Aug 17 14:07:53 2017
 This program calculates the spike-train power spectrum for the generalized two-dimensional integrate and fire neuron from the numerical solution of
 the Fokker-Planck equation in Fourier domain. 
-
 @author: Sebastian Vellmer
 sebastian.vellmer@bccn-berlin.de
 """
@@ -19,13 +18,13 @@ import timeit as time
 iterative=False 
 direct=True
 AdEx=False
+OUP=False      #use if auxiliary process has linear dynamcis to use he analytical solution during the refractory period
 
 """
 iterative: for the iterative solution, the power spectrum is only calculated at 0 and the firing rate and the input parameter for the next 
 iteration are calcualted
 direct: determines the algorithm to solve the sparse linear systems. True=LU decomposition, False=BicGradStab procedure
 AdEx: set the neuron model to either AdEx (True) or LIF (False)
-
 """
 #settings for a nice plot
 plt.rc('font',**{'family':'serif','serif':['Times']},size=14)
@@ -111,20 +110,27 @@ def G_fun(v):
 
 #######################################################################################
 #Fokker-Planck Operator
-N_ele=1000
+N_ele=400
 aloc=np.array(np.linspace(0,(N_ele-1)*N_ele,N_ele),dtype=int)
 vloc=np.array(np.linspace(0,(N_ele-1),N_ele),dtype=int)
 
-#limits have to be set manually
-if beta1**2+beta2**2>0:
-    a0=-np.abs(beta1)*np.sqrt(10./tau_a)
-    aN_1=np.abs(beta1)*np.sqrt(10./tau_a)+10*delta_a
-else:
-    a0=-2
-    aN_1=5*delta_a
+#if the auxiliary process is nonlinear, limits have to be set manually
+#if beta1**2+beta2**2>0:
+#    a0=-np.abs(beta1)*np.sqrt(10./tau_a)
+#    aN_1=np.abs(beta1)*np.sqrt(10./tau_a)+10*delta_a
+#else:
+#    a0=-2
+#    aN_1=5*delta_a
+
+
+#For a linear process the boundaries cna be chosen to be
+a0=-np.sqrt(9/tau_a*(beta1**2+beta2**2))
+aN_1=-a0
+
 v0=-40
 if v0>0:
     v0=-1
+
 
 #a-space
 a=np.linspace(a0,aN_1,N_ele)
@@ -196,17 +202,25 @@ if tref>0:
             x_ref[int(n_a),j]=1-part_a
             x_ref[int(n_a)+1,j]=part_a        
     else:
-        N_ts=int(4*aa*tref)
-        c5=-G_fun(vref)/2./tau_a/da
-        x_ref=np.matrix(np.zeros([N_ele,N_ele]))
-        x_ref[vloc[:-1],vloc[1:]]=(aa+c4[1:]+c5)*tref/N_ts
-        x_ref[vloc[1:],vloc[:-1]]=(aa-c4[:-1]-c5)*tref/N_ts
-        x_ref[vloc[:],vloc[:]]=(-2*aa*tref/N_ts+1)*np.ones(N_ele)
-        x_ref=x_ref**N_ts
+        if OUP==True:
+            x_ref=np.matrix(np.zeros([N_ele,N_ele]))
+            Kappa=np.sqrt(tau_a/(np.pi*(beta1**2+beta2*+2)*(1-np.exp(-2*tref/tau_a))))*da
+            GG=G_fun(vref)
+            for i in range(N_ele):
+                x_ref[i,:]=Kappa*np.exp(-tau_a*(a[i]-GG-np.exp(-tref/tau_a)*(a[:]-GG))**2/(beta1**2+beta2**2)/(1-np.exp(-2*tref/tau_a)))
+        else:
+            N_ts=int(4*aa*tref)
+            c5=-G_fun(vref)/2./tau_a/da
+            x_ref=np.matrix(np.zeros([N_ele,N_ele]))
+            x_ref[vloc[:-1],vloc[1:]]=(aa+c4[1:]+c5)*tref/N_ts
+            x_ref[vloc[1:],vloc[:-1]]=(aa-c4[:-1]-c5)*tref/N_ts
+            x_ref[vloc[:],vloc[:]]=(-2*aa*tref/N_ts+1)*np.ones(N_ele)
+            x_ref=x_ref**N_ts
     x_reff=sci.lil_matrix((N_ele**2,N_ele**2))
     for j in range(N_ele):
-        x_reff[nr+aloc[j],nr+aloc]=x_ref[vloc[j],vloc]
-        x_reff[nr+1+aloc[j],nr+1+aloc]=x_ref[vloc[j],vloc]
+        for k in range(N_ele):
+            x_reff[nr+aloc[j],nr+aloc[k]]=x_ref[vloc[j],vloc[k]]
+            x_reff[nr+1+aloc[j],nr+1+aloc[k]]=x_ref[vloc[j],vloc[k]]
     R=x_reff.dot(R)
     del x_reff
     del x_ref
